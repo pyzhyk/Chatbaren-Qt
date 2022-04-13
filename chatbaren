@@ -1,0 +1,363 @@
+#!/bin/bash
+
+#chatbaren_prefix=$(dirname $(echo $0))
+chatbaren_prefix="/tmp/Chatbaren-Qt"   # custom path
+
+username="[$(cat $chatbaren_prefix/username.txt)]"
+separator=" "
+
+onionname=$(cat $chatbaren_prefix/tor/service/hostname)
+
+if [[ $1 = '-h' ]] || [[ $1 = '--help' ]] || [ -z $1 ]; then
+	echo '[*] HELP'
+	echo '[*]'
+	echo '[*] Usage:'
+	echo '[*]		Create a symlink to Chatbaren script: ln -s /path/to/chatbaren-qt/chatbaren /usr/bin/chatbaren'
+	echo '[*]		Put recipient'"'"'s public key in keys/ (e.g. keys/address.onion)'
+	echo '[*] 		In first terminal window type:  chatbaren -a. That will run a Tor and a server.'
+	echo '[*] 		In second terminal window type: chatbaren -c address.onion where address.onion is recipient'"'"'s address'
+	echo '[*]		Use second window to type, first to watch incoming and outcoming messages.'
+    echo '[*]'
+	echo '[*] Chat usage:'
+	echo '[*] /NULL		Hide your username.'
+	echo '[*] /FULL		Show your username.'
+	echo '[*] /SUMS		Display hashsums of your and recipient'"'"'s public keys.'
+	echo '[*]'
+	echo '[*] Options:'
+	echo '[*] -a			Chat view mode + Server + Tor hidden service in background.'
+	echo '[*] -c address.onion	Type mode to recipient.'
+	echo '[*] -o 			Start tor hidden service'
+	echo '[*] -s			Xterm chat view window + Server + Tor hidden service.'
+	echo '[*] -g			Wipe old and generate new keypair.'
+	echo '[*] -n			Wipe old and generate new tor address.'
+	echo '[*] -k 			Show your public key.'
+	echo '[*] -t			Show your tor address.'
+	echo '[*]'
+	echo '[*] Developer options:'
+	echo '[*] -m address.onion msg username		Send one message to recipient. Localhost sending disabled.'
+	echo '[*] -d sums address.onion			Get address.onion key hashes.'
+	echo '[*] -d sums self				Get your key hashes.'
+	echo '[*] -d address				Get your address.'
+	echo '[*] -d prefix				Get chatbaren_prefix.'
+	echo '[*] -d pubkey				Get your public key.'
+	echo '[*] -d username				Get your username.'
+	echo '[*] -d serve				Start server silent.'
+	echo '[*]'
+	echo '[*] Files and folders:'
+	echo '[*] username.txt			Your username that will be shown in chat window.'
+	echo '[*] keys/				Folder with your recipient'"'"'s public keys and your keypair.'
+	echo '[*] keys/self/self.pub			Your public key. You may share it clearly to recipients.'
+	echo '[*] keys/self/self.key			Your private key. DO NOT SHARE IT! NEVER!'
+	echo '[*] tor/service/hostname		Your tor hostname. Your friend may chat with you only with this name.'
+	echo '[*] tor/service/private_key		Your tor private key. DO NOT SHARE IT! NEVER!'
+
+	exit 0
+fi
+
+chmod 700 $chatbaren_prefix/tor/
+
+if ! [ -s "$chatbaren_prefix/keys/self/self.key" ] && ! [ -s "$chatbaren_prefix/keys/self/self.pub" ] ; then
+	echo '[-] No keypair. Generating new [4096 bit]...'
+	mkdir $chatbaren_prefix/keys 2>/dev/null 1>/dev/null
+	openssl genrsa -out $chatbaren_prefix/keys/self/self.key 4096 2>/dev/null 1>/dev/null
+	echo '[*] Private key generated.'
+	openssl rsa -in $chatbaren_prefix/keys/self/self.key -out $chatbaren_prefix/keys/self/self.pub -outform PEM -pubout 2>/dev/null 1>/dev/null
+	echo '[*] Public key generated.'
+	echo '[*] Keypair generation done.'
+	echo -n '[*] Files: '
+	ls $chatbaren_prefix/keys/self*
+	echo '[*] Show new public key: chatbaren -k'
+	exit 0
+fi
+
+if [[ $1 = '-g' ]]; then
+	echo -n '[?] Do you really want to permanently delete your keypair? [y/N] '
+	read delete_keypair
+	if ! [[ $delete_keypair = 'y' ]];then
+		echo "[-] Canceled. Exit."
+		exit 0
+	fi
+	echo -n '[!] Your contacts must update you public key! [y/N] '
+	read delete_keypair2
+	if ! [[ $delete_keypair2 = 'y' ]];then
+		echo "[-] Canceled. Exit."
+		exit 0
+	fi
+	shred -zn5 $chatbaren_prefix/keys/self/self.* 2>/dev/null 1>/dev/null
+	cat /dev/urandom | head -n100 > $chatbaren_prefix/keys/self/self.key 2>/dev/null 1>/dev/null
+	cat /dev/urandom | head -n100 > $chatbaren_prefix/keys/self/self.key 2>/dev/null 1>/dev/null
+	cat /dev/urandom | head -n100 > $chatbaren_prefix/keys/self/self.key 2>/dev/null 1>/dev/null
+	rm $chatbaren_prefix/keys/self/self.* 2>/dev/null 1>/dev/null
+	mkdir $chatbaren_prefix/keys 2>/dev/null 1>/dev/null
+	echo '[*] Keys Permanently deleted.'
+	openssl genrsa -out $chatbaren_prefix/keys/self/self.key 4096 2>/dev/null 1>/dev/null
+	echo '[*] Private key generated.'
+	openssl rsa -in $chatbaren_prefix/keys/self/self.key -out $chatbaren_prefix/keys/self/self.pub -outform PEM -pubout 2>/dev/null 1>/dev/null
+	echo '[*] Public key generated.'
+	echo '[*] Keypair generation done.'
+	echo -n '[*] Files: '
+	ls $chatbaren_prefix/keys/self*
+	echo '[*] Show new public key: chatbaren -k'
+	exit 0
+fi
+
+if [[ $1 = '-n' ]]; then
+	echo -n '[?] Do you really want to permanently delete your tor address? [y/N] '
+	read delete_tor
+	if ! [[ $delete_tor = 'y' ]];then
+		echo "[-] Canceled. Exit."
+		exit 0
+	fi
+	echo -n '[!] Your contacts must update you address! [y/N] '
+	read delete_tor2
+	if ! [[ $delete_tor2 = 'y' ]];then
+		echo "[-] Canceled. Exit."
+		exit 0
+	fi
+	kill $(ps aux | grep '[t]or' | grep 'chatbaren' | awk -F ' ' '{print $2}') 2>/dev/null 1>/dev/null
+	shred -zn5 $chatbaren_prefix/tor/service/* 2>/dev/null 1>/dev/null
+	cat /dev/urandom | head -n100 > $chatbaren_prefix/tor/service/private_key 2>/dev/null 1>/dev/null
+	cat /dev/urandom | head -n100 > $chatbaren_prefix/tor/service/private_key 2>/dev/null 1>/dev/null
+	cat /dev/urandom | head -n100 > $chatbaren_prefix/tor/service/hs_ed25519_secret_key 2>/dev/null 1>/dev/null
+	cat /dev/urandom | head -n100 > $chatbaren_prefix/tor/service/hs_ed25519_secret_key 2>/dev/null 1>/dev/null
+	rm -rf $chatbaren_prefix/tor/service/* 2>/dev/null 1>/dev/null
+	echo '[*] Your hostname will updated after next Tor connection.'
+	exit 0
+fi
+
+if [[ $1 = '-t' ]]; then
+	echo -n '[*] '
+	cat $chatbaren_prefix/tor/service/hostname
+	exit 0
+fi
+
+if [[ $1 = '-k' ]]; then
+	echo '[*] You may share this key as you want. Send it to recipient.'
+	echo -e '[*] Public key:'"\n"
+	cat $chatbaren_prefix/keys/self/self.pub
+	echo
+	exit 0
+fi
+
+
+
+if [[ $1 = '-s' ]]; then
+	echo '[*] Starting ncat server.'
+	clear
+	while (true); do
+		received=$(ncat --recv-only -l -p 19999 | xz -d | openssl aes-256-cbc -d -iter 981 -in - -out - -kfile $chatbaren_prefix/keys/chatbaren/chatbaren.key)
+		symmetric=$(echo $received | sed -e 's/ ========SEPARATOR======== /\n========SEPARATOR========\n/g' | grep -B1 '^========SEPARATOR========$' | grep -v '^========SEPARATOR========$' | base64 -d | openssl rsautl -decrypt -inkey $chatbaren_prefix/keys/self/self.key | xz -d)
+		echo $received | sed -e 's/ ========SEPARATOR======== /\n========SEPARATOR========\n/g' | grep -A1 '^========SEPARATOR========$' | grep -v '^========SEPARATOR========$' | base64 -d | openssl aes-256-cbc -d -iter 981 -in - -out - -k $symmetric | xz -d
+	done
+	exit 0
+fi
+
+if [[ $1 = '-o' ]]; then
+	echo '[*] Terminating chatbaren tor services.'
+	kill $(ps aux | grep '[t]or' | grep 'chatbaren' | awk -F ' ' '{print $2}') 2>/dev/null 1>/dev/null
+	echo '[*] Configuring Tor'
+	chatbaren_prefix_sed=$(echo -n $chatbaren_prefix | sed -e 's/\//\\\//g')
+	sed -i 's/HiddenServiceDir .*/HiddenServiceDir '$chatbaren_prefix_sed'\/tor\/service/g' $chatbaren_prefix/tor/chatbaren
+	sed -i 's/DataDirectory .*/DataDirectory '$chatbaren_prefix_sed'\/tor/g' $chatbaren_prefix/tor/chatbaren
+	sed -i 's/#Log notice file .*/#Log notice file '$chatbaren_prefix_sed'\/tor\/notices.log/g' $chatbaren_prefix/tor/chatbaren
+	sed -i 's/#Log debug file .*/#Log debug file '$chatbaren_prefix_sed'\/tor\/debug.log/g' $chatbaren_prefix/tor/chatbaren
+	sed -i 's/^Log notice file .*/Log notice file '$chatbaren_prefix_sed'\/tor\/notices.log/g' $chatbaren_prefix/tor/chatbaren
+	sed -i 's/^Log debug file .*/Log debug file '$chatbaren_prefix_sed'\/tor\/debug.log/g' $chatbaren_prefix/tor/chatbaren
+	echo '[*] Starting tor.'
+	sleep 3
+	tor -f $chatbaren_prefix/tor/chatbaren
+	exit 0
+fi
+
+if [[ $1 = '-c' ]]; then
+	recipient=$2
+	clear
+	clear
+	while(true); do
+		echo -n "$username$separator"
+		read message
+		case $message in
+		'/HELP')
+			chat_cmd=1
+			echo ''
+			echo '#########################################'
+			echo '              CHAT HELP'
+			echo '#########################################'
+			echo '/NULL		Hide your username.'
+			echo '/FULL		Show your username.'
+			echo '/SUMS		Display hashsums of your and recipients public keys.'
+			echo ''
+		;;
+		'/NULL')
+			chat_cmd=1
+			username_real=$username
+			separator_real=$separator
+			separator=""
+			username=""
+		;;
+		'/FULL')
+			chat_cmd=1
+			username=$username_real
+			separator=$separator_real
+		;;
+		'/SUMS')
+			chat_cmd=1
+			echo ''
+			echo '#########################################'
+			echo '             HASHSUM CHECK'
+			echo '#########################################'
+			echo 'Recipient ['"$recipient"']: '
+			echo -n 'MD5 '
+			echo -n $(cat "$chatbaren_prefix/keys/$recipient" | grep -v 'PUBLIC') | md5sum | awk '{print $1}'
+			echo -n 'SHA1 '
+			echo -n $(cat "$chatbaren_prefix/keys/$recipient" | grep -v 'PUBLIC') | sha1sum | awk '{print $1}'
+			#echo -n 'SHA256 '
+			#echo -n $(cat "$chatbaren_prefix/keys/$recipient" | grep -v 'PUBLIC') | sha256sum | awk '{print $1}'
+
+			echo
+			echo 'Self ['"$onionname"']: '
+			echo -n 'MD5 '
+			echo -n $(cat "$chatbaren_prefix/keys/self/self.pub" | grep -v 'PUBLIC') | md5sum | awk '{print $1}'
+			echo -n 'SHA1 '
+			echo -n $(cat "$chatbaren_prefix/keys/self/self.pub" | grep -v 'PUBLIC') | sha1sum | awk '{print $1}'
+			#echo -n 'SHA256 '
+			#echo -n $(cat "$chatbaren_prefix/keys/self/self.pub" | grep -v 'PUBLIC') | sha256sum | awk '{print $1}'
+			echo ''
+		;;
+		esac
+		if ! [[ $chat_cmd = "1" ]]; then
+		key=$(cat /dev/urandom | head -n 512 | strings | shuf | tr -td '\n' | base32 -w0 | cut -b 1-512)
+		{ echo "$key" | xz | openssl rsautl -encrypt -inkey $chatbaren_prefix/keys/$recipient -pubin | base64 -w0; echo; echo '========SEPARATOR========'; echo "$username$separator$message" | xz | openssl aes-256-cbc -iter 981 -in - -out - -k $key | base64 -w0; } | openssl aes-256-cbc -iter 981 -in - -out - -kfile $chatbaren_prefix/keys/chatbaren/chatbaren.key | xz | ncat --proxy-type socks4 --proxy 127.0.0.1:19990 --send-only $recipient 19999 2>/dev/null 1>/dev/null #send to recipient
+		key=$(cat /dev/urandom | head -n 512 | strings | shuf | tr -td '\n' | base32 -w0 | cut -b 1-512)
+		{ echo "$key" | xz | openssl rsautl -encrypt -inkey $chatbaren_prefix/keys/self/self.pub -pubin | base64 -w0; echo; echo '========SEPARATOR========'; echo "$username$separator$message" | xz | openssl aes-256-cbc -iter 981 -in - -out - -k $key | base64 -w0; } | openssl aes-256-cbc -iter 981 -in - -out - -kfile $chatbaren_prefix/keys/chatbaren/chatbaren.key | xz | ncat --send-only 127.0.0.1 19999 2>/dev/null 1>/dev/null #send local
+		fi
+		chat_cmd=0
+	done
+	exit 0
+fi
+
+if [[ $1 = '-a' ]]; then
+	echo '[*] Terminating chatbaren tor services.'
+	kill $(ps aux | grep '[t]or' | grep '/tor/chatbaren' | awk -F ' ' '{print $2}') 2>/dev/null 1>/dev/null
+	echo '[*] Configuring Tor'
+	chatbaren_prefix_sed=$(echo -n $chatbaren_prefix | sed -e 's/\//\\\//g')
+	sed -i 's/HiddenServiceDir .*/HiddenServiceDir '$chatbaren_prefix_sed'\/tor\/service/g' $chatbaren_prefix/tor/chatbaren
+	sed -i 's/DataDirectory .*/DataDirectory '$chatbaren_prefix_sed'\/tor/g' $chatbaren_prefix/tor/chatbaren
+	sed -i 's/#Log notice file .*/#Log notice file '$chatbaren_prefix_sed'\/tor\/notices.log/g' $chatbaren_prefix/tor/chatbaren
+	sed -i 's/#Log debug file .*/#Log debug file '$chatbaren_prefix_sed'\/tor\/debug.log/g' $chatbaren_prefix/tor/chatbaren
+	sed -i 's/^Log notice file .*/Log notice file '$chatbaren_prefix_sed'\/tor\/notices.log/g' $chatbaren_prefix/tor/chatbaren
+	sed -i 's/^Log debug file .*/Log debug file '$chatbaren_prefix_sed'\/tor\/debug.log/g' $chatbaren_prefix/tor/chatbaren
+	echo '[*] Starting tor.'
+	sleep 3
+	tor -f $chatbaren_prefix/tor/chatbaren 2>/dev/null 1>/dev/null &
+	echo '[*] Starting ncat server.'
+	clear
+	while (true); do
+		received=$(ncat --recv-only -l -p 19999 | xz -d | openssl aes-256-cbc -d -iter 981 -in - -out - -kfile $chatbaren_prefix/keys/chatbaren/chatbaren.key)
+		symmetric=$(echo $received | sed -e 's/ ========SEPARATOR======== /\n========SEPARATOR========\n/g' | grep -B1 '^========SEPARATOR========$' | grep -v '^========SEPARATOR========$' | base64 -d | openssl rsautl -decrypt -inkey $chatbaren_prefix/keys/self/self.key | xz -d)
+		echo $received | sed -e 's/ ========SEPARATOR======== /\n========SEPARATOR========\n/g' | grep -A1 '^========SEPARATOR========$' | grep -v '^========SEPARATOR========$' | base64 -d | openssl aes-256-cbc -d -iter 981 -in - -out - -k $symmetric | xz -d
+	done
+	exit 0
+fi
+
+if [[ $1 = "-m" ]]; then
+	if ! [[ $4 = "" ]]; then
+		if [[ $4 = "_-_--.HIDE_USERNAME.--_-_" ]]; then
+			username=""
+			separator=""
+		else
+			username="$4"
+		fi
+	fi
+	recipient=$2
+	message=$(echo $3 | base64 -d)
+	key=$(cat /dev/urandom | head -n 512 | strings | shuf | tr -td '\n' | base32 -w0 | cut -b 1-512)
+	{ echo "$key" | xz | openssl rsautl -encrypt -inkey $chatbaren_prefix/keys/$recipient -pubin | base64 -w0; echo; echo '========SEPARATOR========'; echo "$username$separator$message" | xz | openssl aes-256-cbc -iter 981 -in - -out - -k $key | base64 -w0; } | openssl aes-256-cbc -iter 981 -in - -out - -kfile $chatbaren_prefix/keys/chatbaren/chatbaren.key | xz | ncat --proxy-type socks4 --proxy 127.0.0.1:19990 --send-only $recipient 19999 2>/dev/null 1>/dev/null & #send to recipient
+fi
+
+if [[ $1 = "-d" ]]; then
+
+case $2 in
+	sums)
+		echo 'Self   ['"$onionname"'] '
+		echo -n 'MD5    '
+		echo -n $(cat "$chatbaren_prefix/keys/self/self.pub" | grep -v 'PUBLIC') | md5sum | awk '{print $1}'
+		echo -n 'SHA1   '
+		echo -n $(cat "$chatbaren_prefix/keys/self/self.pub" | grep -v 'PUBLIC') | sha1sum | awk '{print $1}'
+		#echo -n 'SHA256 '
+		#echo -n $(cat "$chatbaren_prefix/keys/self/self.pub" | grep -v 'PUBLIC') | sha256sum | awk '{print $1}'
+		echo
+		recipient=$3
+		echo 'Recipient ['"$recipient"']: '
+		echo -n 'MD5    '
+		echo -n $(cat "$chatbaren_prefix/keys/$recipient" | grep -v 'PUBLIC') | md5sum | awk '{print $1}'
+		echo -n 'SHA1   '
+		echo -n $(cat "$chatbaren_prefix/keys/$recipient" | grep -v 'PUBLIC') | sha1sum | awk '{print $1}'
+		#echo -n 'SHA256 '
+		#echo -n $(cat "$chatbaren_prefix/keys/$recipient" | grep -v 'PUBLIC') | sha256sum | awk '{print $1}'
+		#echo
+	;;
+	address)
+		echo $onionname
+	;;
+	prefix)
+		echo -n $chatbaren_prefix
+	;;
+	pubkey)
+		cat $chatbaren_prefix/keys/self/self.pub
+	;;
+	username)
+		echo -n $(cat $chatbaren_prefix/username.txt)
+	;;
+	serve)
+		kill $(ps aux | grep 'ncat' | grep '19999' | awk -F ' ' '{print $2}') 2>/dev/null 1>/dev/null
+		kill $(ps aux | grep 'openssl' | grep 'chatbaren' | awk -F ' ' '{print $2}') 2>/dev/null 1>/dev/null
+		kill $(ps aux | grep 'chatbaren' | grep -v "$$" | grep bash | awk -F ' ' '{print $2}') 2>/dev/null 1>/dev/null
+		kill $(ps aux | grep 'ncat' | grep 19999 | awk -F ' ' '{print $2}') 2>/dev/null 1>/dev/null
+
+		kill $(ps aux | grep '[t]or' | grep '/tor/chatbaren' | awk -F ' ' '{print $2}') 2>/dev/null 1>/dev/null
+		echo ''
+		chatbaren_prefix_sed=$(echo -n $chatbaren_prefix | sed -e 's/\//\\\//g')
+		sed -i 's/HiddenServiceDir .*/HiddenServiceDir '$chatbaren_prefix_sed'\/tor\/service/g' $chatbaren_prefix/tor/chatbaren
+		sed -i 's/DataDirectory .*/DataDirectory '$chatbaren_prefix_sed'\/tor/g' $chatbaren_prefix/tor/chatbaren
+		sed -i 's/#Log notice file .*/#Log notice file '$chatbaren_prefix_sed'\/tor\/notices.log/g' $chatbaren_prefix/tor/chatbaren
+		sed -i 's/#Log debug file .*/#Log debug file '$chatbaren_prefix_sed'\/tor\/debug.log/g' $chatbaren_prefix/tor/chatbaren
+		sed -i 's/^Log notice file .*/Log notice file '$chatbaren_prefix_sed'\/tor\/notices.log/g' $chatbaren_prefix/tor/chatbaren
+		sed -i 's/^Log debug file .*/Log debug file '$chatbaren_prefix_sed'\/tor\/debug.log/g' $chatbaren_prefix/tor/chatbaren
+		sleep 2
+		tor -f $chatbaren_prefix/tor/chatbaren 2>/dev/null 1>/dev/null &
+
+		while (true); do
+		received=$(ncat --recv-only -l -p 19999 | xz -d | openssl aes-256-cbc -d -iter 981 -in - -out - -kfile $chatbaren_prefix/keys/chatbaren/chatbaren.key)
+		symmetric=$(echo $received | sed -e 's/ ========SEPARATOR======== /\n========SEPARATOR========\n/g' | grep -B1 '^========SEPARATOR========$' | grep -v '^========SEPARATOR========$' | base64 -d | openssl rsautl -decrypt -inkey $chatbaren_prefix/keys/self/self.key | xz -d)
+		echo $received | sed -e 's/ ========SEPARATOR======== /\n========SEPARATOR========\n/g' | grep -A1 '^========SEPARATOR========$' | grep -v '^========SEPARATOR========$' | base64 -d | openssl aes-256-cbc -d -iter 981 -in - -out - -k $symmetric | xz -d
+		done
+	;;
+	starttor)
+		chatbaren_prefix_sed=$(echo -n $chatbaren_prefix | sed -e 's/\//\\\//g')
+		sed -i 's/HiddenServiceDir .*/HiddenServiceDir '$chatbaren_prefix_sed'\/tor\/service/g' $chatbaren_prefix/tor/chatbaren
+		sed -i 's/DataDirectory .*/DataDirectory '$chatbaren_prefix_sed'\/tor/g' $chatbaren_prefix/tor/chatbaren
+		sed -i 's/#Log notice file .*/#Log notice file '$chatbaren_prefix_sed'\/tor\/notices.log/g' $chatbaren_prefix/tor/chatbaren
+		sed -i 's/#Log debug file .*/#Log debug file '$chatbaren_prefix_sed'\/tor\/debug.log/g' $chatbaren_prefix/tor/chatbaren
+		sed -i 's/^Log notice file .*/Log notice file '$chatbaren_prefix_sed'\/tor\/notices.log/g' $chatbaren_prefix/tor/chatbaren
+		sed -i 's/^Log debug file .*/Log debug file '$chatbaren_prefix_sed'\/tor\/debug.log/g' $chatbaren_prefix/tor/chatbaren
+		tor -f $chatbaren_prefix/tor/chatbaren &
+	;;
+	stoptor)
+		kill $(ps aux | grep '[t]or' | grep 'chatbaren' | grep -v 'stoptor' | awk -F ' ' '{print $2}') 2>/dev/null 1>/dev/null
+	;;
+	restarttor)
+		kill $(ps aux | grep '[t]or' | grep 'chatbaren' | grep -v 'restarttor' | awk -F ' ' '{print $2}') 2>/dev/null 1>/dev/null
+		chatbaren_prefix_sed=$(echo -n $chatbaren_prefix | sed -e 's/\//\\\//g')
+		sed -i 's/HiddenServiceDir .*/HiddenServiceDir '$chatbaren_prefix_sed'\/tor\/service/g' $chatbaren_prefix/tor/chatbaren
+		sed -i 's/DataDirectory .*/DataDirectory '$chatbaren_prefix_sed'\/tor/g' $chatbaren_prefix/tor/chatbaren
+		sed -i 's/#Log notice file .*/#Log notice file '$chatbaren_prefix_sed'\/tor\/notices.log/g' $chatbaren_prefix/tor/chatbaren
+		sed -i 's/#Log debug file .*/#Log debug file '$chatbaren_prefix_sed'\/tor\/debug.log/g' $chatbaren_prefix/tor/chatbaren
+		sed -i 's/^Log notice file .*/Log notice file '$chatbaren_prefix_sed'\/tor\/notices.log/g' $chatbaren_prefix/tor/chatbaren
+		sed -i 's/^Log debug file .*/Log debug file '$chatbaren_prefix_sed'\/tor\/debug.log/g' $chatbaren_prefix/tor/chatbaren
+		sleep 1
+		tor -f $chatbaren_prefix/tor/chatbaren &
+	;;
+esac
+
+fi
